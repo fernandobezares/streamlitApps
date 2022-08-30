@@ -10,7 +10,7 @@ st.header('Represent and analyse Forest data dynamically')
 st.markdown('This webb app is an example of how data can be presented in a user responsive dashboard. The data shown corresponds'
             ' to a forest plot in Carboneras (Soria, Spain) ')
 
-tree_data= pd.read_csv(r'C:\data_fsct\tree_data.csv')
+tree_data= pd.read_csv(r'tree_data.csv')
 
 st.markdown('*Data from FSCT*')
 st.dataframe(tree_data)
