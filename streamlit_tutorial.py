@@ -63,11 +63,11 @@ map_data = pd.DataFrame(
 st.map(map_data)
 
 #  load images
-adm = Image.open(r'C:\Users\fernando.bezares\Pictures\equipo_srural\admarco.png')
-fbs = Image.open(r'C:\Users\fernando.bezares\Pictures\equipo_srural\fbezares.png')
-jc = Image.open(r'C:\Users\fernando.bezares\Pictures\equipo_srural\jc.png')
-dh = Image.open(r'C:\Users\fernando.bezares\Pictures\equipo_srural\dhernandez.png')
-sm = Image.open(r'C:\Users\fernando.bezares\Pictures\equipo_srural\smorcuende.jfif')
+adm = Image.open(r'admarco.png')
+fbs = Image.open(r'fbezares.png')
+jc = Image.open(r'jc.png')
+dh = Image.open(r'dhernandez.png')
+sm = Image.open(r'smorcuende.jfif')
 
 ## add Elements to the sidebar
 
