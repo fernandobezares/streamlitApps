@@ -1,5 +1,5 @@
-pillow 9.2.0
-pandas 1.4.2
-numpy 1.22.4
-plotly 5.10.0
-streamlit 1.10.0
+pillow == 9.2.0
+pandas == 1.4.2
+numpy == 1.22.4
+plotly == 5.10.0
+streamlit == 1.10.0
