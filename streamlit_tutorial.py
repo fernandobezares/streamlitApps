@@ -102,7 +102,7 @@ st.sidebar.markdown('')
 
 st.sidebar.header('Daniel Hernandez | Android Developer')
 st.sidebar.image(dh, caption='Daniel Hernández')
-st.sidebar.markdown('Strength: Talks fast, Efficient Communication')
+st.sidebar.markdown('Strength: Massive energy')
 st.sidebar.markdown('Weakness: BootCV')
 
 
