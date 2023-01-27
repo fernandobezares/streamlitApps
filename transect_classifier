@@ -1,0 +1,299 @@
+import streamlit as st
+import pandas as pd
+import shutil
+import pydeck as pdk
+import plotly.express as px
+from PIL import Image
+from exif import Image
+import glob
+import os
+import geopandas as gpd
+from shapely.geometry import Point
+import argparse
+import sys
+import time
+# path to the image or video
+# directory  = r'D:\Imagenes Dron\Skydron novena 26ago22 chopo'
+
+
+def get_images(directory):
+
+    image_paths = glob.glob(os.path.join(directory,'*.JPG'))
+
+    return image_paths
+
+
+def decimal_coords(coords, ref):
+    decimal_degrees = coords[0] + coords[1] / 60 + coords[2] / 3600
+    if ref == 'S' or ref == 'W':
+        decimal_degrees = -decimal_degrees
+    return decimal_degrees
+
+def image_coordinates(img_path):
+    """
+    get the coordinates of an image from the EXIF data in decimal degrees
+    """
+    # open the image
+    with open(img_path, 'rb') as src:
+        img = Image(src)
+        #print(img.list_all())
+    if img.has_exif: # check if there is EXIF metadata
+        try:
+            coords = (decimal_coords(img.gps_latitude,
+                      img.gps_latitude_ref),
+                      decimal_coords(img.gps_longitude,
+                      img.gps_longitude_ref))
+        except AttributeError:
+            print ('No Coordinates')
+    else:
+        print ('The Image has no EXIF information')
+        Txtfile = open('Images_without_EXIF_data', 'r+')
+        Txtfile.write(str(src.name))  # Escribir en el fichero de comandos
+        Txtfile.close()
+
+    #print(f"Image {src.name}, OS Version:{img.get('software', 'Not Known')} ------")
+    #print(f"Was taken: {img.datetime_original}, and has coordinates:{coords}")
+
+    return [src.name,coords,img.gps_altitude]
+
+
+def build_gdf_from_imgs(directory):
+    gdf_list = []
+
+    for image in get_images(directory):
+
+        # get image name
+        name = image_coordinates(image)[0]
+
+        # get image coords
+        lat = image_coordinates(image)[1][0]
+        long = image_coordinates(image)[1][1]
+
+        # altitude
+        alt = image_coordinates(image)[2]
+
+        # create a GeoDataFrame and populate it with the data
+        gdf = gpd.GeoDataFrame(
+            {
+            'name': [name],
+            'geometry':[Point(lat,long)],
+            'transect':-1,
+            'distance':0,
+            'lat':lat,
+            'lon':long,
+            'alt':alt,
+            'type':''
+            }
+            ,crs = "EPSG:4326")
+
+        gdf_list.append(gdf)
+
+    df = gpd.GeoDataFrame(pd.concat(gdf_list, ignore_index=True))
+
+    #print('geodataframe',df)
+
+    return df
+
+def get_ground_altitude(gdf):
+
+    first_img = gdf.iloc[0]
+
+    ref_alt = first_img['alt']
+
+    return ref_alt
+
+def create_folder(path):
+    if os.path.exists(path):
+        pass
+    else:
+        os.mkdir(path)
+
+def create_output_folders(directory,output_directory):
+    ''' Creates a structure of directories inf the output directory based in the name of the input directory.
+    Inside, it creates two additional folders 'Terrestrial' and 'Aerial' '''
+
+    global folder_in_out_dir
+    global folder_terrestrial
+    global folder_aerial
+
+    # define output folder
+    folder_in_out_dir = os.path.join(output_directory, os.path.basename(directory))
+
+    # create folder
+    create_folder(folder_in_out_dir)
+
+    # define paths to terrestre and aerea folders
+    folder_terrestrial = os.path.join(folder_in_out_dir, os.path.basename('Terrestrial'))
+    folder_aerial = os.path.join(folder_in_out_dir, os.path.basename('Aerial'))
+
+    # create them
+    create_folder(folder_terrestrial)
+    create_folder(folder_aerial)
+
+
+
+def classify_in_transects(gdf, split_value = 1.4):
+
+    # change the coordinates to projected to get distnaces in meters
+    gdf = gdf.to_crs("EPSG:25830")
+
+    # select counter
+    t = 0
+
+    # get the altitude value of the first image
+    ref_alt = get_ground_altitude(gdf)
+
+    for index in range(0,len(gdf)): # Looping over all points
+        #print(index)
+
+        if index == len(gdf)-1:
+            break
+        else:
+            this_row = gdf.iloc[index]
+            next_row = gdf.iloc[index+1]
+            #print(this_row['geometry'])
+
+            # compute euclidean distance from the image coord adn teh enxt image coord
+            d = this_row['geometry'].distance(next_row['geometry'])  # Calculate distance
+
+            # write the value in the distance col
+            gdf.at[index, 'distance'] = d
+
+            # select altitude value of this row
+            alt = this_row['alt']
+
+            # height
+            height = alt - ref_alt
+
+            #print(height)
+            #print('distance',d)
+            if height < 20:
+                gdf.at[index, 'type'] = 'Terrestrial'
+                if d < split_value:
+                    gdf.at[index, 'transect'] = t  # If within cutoff: Store
+                else:
+                    t = t + 1
+                    gdf.at[index, 'transect'] = t
+            else:
+                gdf.at[index, 'type'] = 'Aerial'
+                if d < 3:
+                    gdf.at[index, 'transect'] = t  # If within cutoff: Store
+                else:
+                    t = t + 1
+                    gdf.at[index, 'transect'] = t
+
+        gdf.to_csv(os.path.join(folder_in_out_dir, 'image_data.csv'), index=False)
+
+    return gdf
+
+
+def split_in_transects(gdf, min_group_size = 30):
+    # group by transects
+    groups = gdf.groupby('transect').count()
+
+    # select the groups bigger than a group size
+    selected = groups[groups['name']> min_group_size]
+
+    # reset index for column extraction
+    selected = gpd.GeoDataFrame(selected).reset_index()
+
+    # select transects
+    selected_transects = selected['transect']
+
+    # turn to list
+    transect_list = selected_transects.to_list()
+
+    # select the transects in the selected groups
+    gdf_filtered = gdf[gdf['transect'].isin(selected_transects)]
+
+    gdf_filtered.to_csv(os.path.join(folder_in_out_dir, 'image_data_filtered_by_transect.csv'), index=False)
+
+    # create a new directory for each transect and paste the photos there for metashape
+    for transect in transect_list:
+
+        # select the rows of the specific transect
+        transect_df = gdf_filtered[gdf_filtered['transect'] == transect]
+
+        # get the transect type
+        transect_type = transect_df['type'].to_list()
+
+        # get the mode
+        transect_type = max(set(transect_type), key = transect_type.count)
+
+        # create the transect folders according to their type
+        if transect_type == 'Terrestrial':
+            # create directory for transect
+            transect_dir = os.path.join(folder_terrestrial,str(transect))
+            create_folder(transect_dir)
+        elif transect_type == 'Aerial':
+            transect_dir = os.path.join(folder_aerial, str(transect))
+            create_folder(transect_dir)
+        else:
+            transect_dir = os.path.join(folder_in_out_dir, str(transect))
+            create_folder(transect_dir)
+
+
+        # select the names of the photos of the transect
+        files = transect_df['name'].to_list()
+
+        # move the files to the new destination
+        for file in files:
+            old_dest = file
+            new_dest = os.path.join(transect_dir,os.path.basename(file))
+
+            shutil.copy(old_dest,new_dest)
+
+def run (directory,output_directory):
+
+    startTime = time.time()
+
+    # define folder structure
+    print('creating folders ...')
+    create_output_folders(directory, output_directory)
+
+    print('folders created!')
+    print('building dataframe with image metadata ...')
+    # build geodataframe to with the information of the images
+    gdf = build_gdf_from_imgs(directory)
+
+    print('dataframe built!')
+    print('classifying photos in transects ...')
+    # classify the images in transects according to distance metrics
+    gdf_classified_transects = classify_in_transects(gdf)
+
+    print('photos classified!!')
+    print('spliting photos in transects and moving to target folders ...')
+
+    # split the images in transects and move them to their target folders
+    split_in_transects(gdf_classified_transects)
+
+    endTime = time.time()
+    print('              END PROCESSING TIME', endTime)
+    print('              TOTAL PROCESSING TIME', round((endTime - startTime) / 60, 2), 'mins')
+
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--op", type=str, help="Escribe la ruta de la carpeta donde están las imágenes que quieres dividir en transectos.")
+    parser.add_argument(
+        "--np", type=str, help="Escribe la ruta de la carpeta donde quieres guardar las imágenes.")
+
+    args = parser.parse_args()
+    orig = f'{args.op}'
+    dest = f'{args.op}'
+    if args.np is not None:
+        dest = f'{args.np}'
+    sys.stdout.write(str(run(orig,dest)))
+
+
+if __name__=='__main__':
+    run(r'D:\Skydron undecima 5oct22 chopera',r'C:\Users\fernando.bezares\Desktop')
+
+    # define input and oupt put directories
+    # directory = r'C:\datos_pasada' #r'D:\Imagenes Dron\Skydron decima 02sep22 chopo'
+    # output_directory = r'C:\Users\fernando.bezares\Desktop'
+
+    # run
+    # run(directory,output_directory)
